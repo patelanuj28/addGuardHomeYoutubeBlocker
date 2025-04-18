@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Build the release version
+cargo build --release
+
+# Set environment variables
+export ADGUARD_URL="http://your-adguard-ip:port"
+export ADGUARD_USERNAME="your-username"
+export ADGUARD_PASSWORD="your-password"
+
+# Run the application
+./target/release/adGuardHomeYoutube
