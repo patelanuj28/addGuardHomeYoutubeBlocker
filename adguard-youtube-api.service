@@ -1,0 +1,26 @@
+//sudo nano /etc/systemd/system/adguard-youtube-api.service
+
+
+[Unit]
+Description=AdGuard YouTube API Service
+After=network.target
+
+[Service]
+Type=simple
+User=oslohouse
+WorkingDirectory=/home/oslohouse/workspace/addGuardHomeYoutubeBlocker
+ExecStart=/home/oslohouse/workspace/addGuardHomeYoutubeBlocker/target/release/adguard-youtube-api
+Environment="ADGUARD_URL=http://10.0.0.xx:xxx"
+Environment="ADGUARD_USERNAME=password"
+Environment="ADGUARD_PASSWORD=password"
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
+
+sudo systemctl enable adguard-youtube-api.service
+sudo systemctl start adguard-youtube-api.service
+
+sudo systemctl status adguard-youtube-api.service
