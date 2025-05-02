@@ -8,5 +8,12 @@ export ADGUARD_URL="http://your-adguard-ip:port"
 export ADGUARD_USERNAME="your-username"
 export ADGUARD_PASSWORD="your-password"
 
+export MQTT_HOST="your-mqtt-host"
+export MQTT_PORT="your-mqtt-port"
+export MQTT_USERNAME="your-mqtt-username"
+export MQTT_PASSWORD="your-mqtt-password" 
+export MQTT_TOPIC="/home/adGuardhomeyoutube/youtube"
+
+
 # Run the application
 ./target/release/adGuardHomeYoutube

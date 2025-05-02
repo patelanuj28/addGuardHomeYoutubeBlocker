@@ -1,8 +1,8 @@
 use axum::{
-    routing::{get, post},
+    routing::{get},
     http::StatusCode,
     Json, Router, extract::State,
-    response::{IntoResponse, Response},
+    response::{IntoResponse},
 };
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, net::SocketAddr};
@@ -13,6 +13,9 @@ use anyhow::anyhow;
 use reqwest::{Client, header};
 use serde_json::json;
 use std::time::Duration;
+mod mqtt; // <-- new
+use mqtt::{start_mqtt_listener, MqttCommand};
+use tokio::sync::mpsc;
 
 /// Configuration for AdGuard Home API connection
 #[derive(Clone, Debug, Deserialize)]
@@ -239,46 +242,74 @@ async fn status_handler() -> impl IntoResponse {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     tracing_subscriber::fmt::init();
-    
-    // Load configuration
+
+    // Load AdGuard configuration
     let config = AdGuardConfig {
         base_url: std::env::var("ADGUARD_URL").unwrap_or_else(|_| "default ip".to_string()),
-        username: std::env::var("ADGUARD_USERNAME").unwrap_or_else(|_| "default  username".to_string()),
+        username: std::env::var("ADGUARD_USERNAME").unwrap_or_else(|_| "default username".to_string()),
         password: std::env::var("ADGUARD_PASSWORD").unwrap_or_else(|_| "default password".to_string()),
         timeout_seconds: std::env::var("ADGUARD_TIMEOUT")
             .unwrap_or_else(|_| "30".to_string())
             .parse()
             .unwrap_or(30),
     };
-    
-    info!("Starting AdGuard YouTube API");
-    info!("Configured for AdGuard Home at: {}", config.base_url);
-    
-    // Create AdGuard client
+
+    // Load MQTT configuration
+    let mqtt_host = std::env::var("MQTT_HOST").unwrap_or_else(|_| "broker.emqx.io".to_string());
+    let mqtt_port = std::env::var("MQTT_PORT").unwrap_or_else(|_| "1883".to_string()).parse::<u16>().unwrap_or(1883);
+    let mqtt_username = std::env::var("MQTT_USERNAME").unwrap_or_else(|_| "".to_string());
+    let mqtt_password = std::env::var("MQTT_PASSWORD").unwrap_or_else(|_| "".to_string());
+    let mqtt_topic = std::env::var("MQTT_TOPIC").unwrap_or_else(|_| "/home/adGuardhomeyoutube/youtube".to_string());
+
+    info!("Starting AdGuard YouTube API and MQTT listener");
+
     let client = AdGuardClient::new(config);
-    
-    // Create application state
-    let state = Arc::new(AppState { client });
-    
-    // Build the Axum router
+    let state = Arc::new(AppState { client: client.clone() });
+
+    // Set up channel to receive MQTT commands
+    let (tx, mut rx) = mpsc::channel(10);
+
+    // Start MQTT listener
+    tokio::spawn(async move {
+        start_mqtt_listener(tx, &mqtt_host, mqtt_port, &mqtt_username, &mqtt_password, &mqtt_topic).await;
+    });
+
+    // Handle MQTT commands in background
+    let command_state = state.clone();
+    tokio::spawn(async move {
+        while let Some(command) = rx.recv().await {
+            match command {
+                MqttCommand::EnableYouTube => {
+                    if let Ok(token) = command_state.client.login().await {
+                        if let Err(e) = command_state.client.enable_youtube(&token).await {
+                            error!("Failed to enable YouTube: {}", e);
+                        }
+                    }
+                }
+                MqttCommand::DisableYouTube => {
+                    if let Ok(token) = command_state.client.login().await {
+                        if let Err(e) = command_state.client.disable_youtube(&token).await {
+                            error!("Failed to disable YouTube: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // Build Axum router
     let app = Router::new()
         .route("/", get(status_handler))
-        .route("/youtube/enable", get(enable_youtube_handler)) // Enable YouTube blocking via get so easy to trigger on one click from phone
-        .route("/youtube/disable", get(disable_youtube_handler)) // Disable YouTube blocking via get so easy to trigger on one click from phone
+        .route("/youtube/enable", get(enable_youtube_handler))
+        .route("/youtube/disable", get(disable_youtube_handler))
         .with_state(state);
-    
-    // Define the address to listen on - read from environment or use default
-    let port = std::env::var("PORT")
-        .unwrap_or_else(|_| "3000".to_string())
-        .parse::<u16>()
-        .unwrap_or(3000);
-    
+
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string()).parse::<u16>().unwrap_or(3000);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!("Listening on {}", addr);
-    
-    // Start the server
+
     let listener = TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
-    
+
     Ok(())
 }
